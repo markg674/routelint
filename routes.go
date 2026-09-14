@@ -136,6 +136,33 @@ func looksLikeHost(host string) bool {
 	return strings.Contains(host, ".") || strings.Contains(host, ":") || strings.HasPrefix(host, "*.")
 }
 
+// normalizeMuxPath rewrites a path's wildcard segments to a canonical form
+// so that two patterns differing only in parameter names, such as
+// "/users/{id}" and "/users/{name}", collapse to the same key. This
+// mirrors net/http's own matching rules: ServeMux doesn't look at wildcard
+// names when deciding whether two patterns can both match a request, so
+// registering both really does panic at runtime, not just look duplicated
+// on paper. A trailing "{name...}" segment is kept distinct from a plain
+// "{name}" since it matches the rest of the path, not a single segment,
+// and "{$}" is left alone since it's an exact-end anchor rather than a
+// wildcard.
+func normalizeMuxPath(path string) string {
+	segments := strings.Split(path, "/")
+	for i, seg := range segments {
+		if seg == "" || seg == "{$}" {
+			continue
+		}
+		if strings.HasPrefix(seg, "{") && strings.HasSuffix(seg, "}") {
+			if strings.HasSuffix(seg[1:len(seg)-1], "...") {
+				segments[i] = "{...}"
+			} else {
+				segments[i] = "{}"
+			}
+		}
+	}
+	return strings.Join(segments, "/")
+}
+
 // checkPatterns runs the built-in static checks against a set of routes
 // gathered from one or more files and returns findings sorted by
 // file and line.
@@ -166,7 +193,7 @@ func checkPatterns(routes []Route) []Finding {
 		if effectiveMethod == "" {
 			effectiveMethod = r.Method
 		}
-		key := effectiveMethod + " " + host + path
+		key := effectiveMethod + " " + host + normalizeMuxPath(path)
 		seen[key] = append(seen[key], r)
 
 		if host != "" && !looksLikeHost(host) {
@@ -191,11 +218,15 @@ func checkPatterns(routes []Route) []Finding {
 		sort.Slice(dupes, func(i, j int) bool { return dupes[i].Line < dupes[j].Line })
 		first := dupes[0]
 		for _, dup := range dupes[1:] {
-			findings = append(findings, Finding{
-				dup.File, dup.Line,
-				"duplicate route " + strconv.Quote(key) + ", first registered at " +
-					first.File + ":" + strconv.Itoa(first.Line),
-			})
+			at := ", first registered at " + first.File + ":" + strconv.Itoa(first.Line)
+			var msg string
+			if dup.Pattern == first.Pattern {
+				msg = "duplicate route " + strconv.Quote(key) + at
+			} else {
+				msg = "route pattern " + strconv.Quote(dup.Pattern) + " conflicts with " +
+					strconv.Quote(first.Pattern) + " (same path shape once parameter names are ignored)" + at
+			}
+			findings = append(findings, Finding{dup.File, dup.Line, msg})
 		}
 	}
 

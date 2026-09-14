@@ -17,6 +17,11 @@ before any of this reaches production.
 ## What it looks for
 
 - Duplicate patterns registered under the same method, even across files
+- Patterns that conflict once you ignore wildcard names, e.g.
+  `/users/{id}` and `/users/{name}` registered under the same method:
+  `ServeMux` matches on path shape, not on what a wildcard is called, so
+  it panics on both being registered just as if the patterns were
+  identical
 - Patterns missing a leading `/`
 - Patterns containing a doubled `/`
 - Empty patterns
@@ -79,10 +84,9 @@ be wired into CI as a plain build step.
 
 ## Status
 
-Early. The checks above are deliberately simple string checks; there's
-no understanding yet of path parameters (`/users/{id}`) for overlap
-detection, or route groups/mounts that prefix a whole set of children
-with a shared path.
+Early. The checks above are deliberately simple string and structural
+checks; there's no understanding yet of route groups/mounts that prefix
+a whole set of children with a shared path.
 
 ## License
 
