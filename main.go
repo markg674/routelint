@@ -52,7 +52,10 @@ func main() {
 
 // collectGoFiles resolves an argument into a list of .go files. A plain
 // file path is returned as-is; a directory is walked recursively,
-// skipping vendor directories and anything hidden.
+// skipping vendor and testdata directories and anything hidden. testdata
+// is skipped because it's where fixture files with deliberately bad
+// patterns live for this project's own test suite, and go tooling
+// already treats it as non-package content.
 func collectGoFiles(path string) ([]string, error) {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -72,7 +75,7 @@ func collectGoFiles(path string) ([]string, error) {
 		}
 		if d.IsDir() {
 			name := d.Name()
-			if name != "." && (name == "vendor" || strings.HasPrefix(name, ".")) {
+			if name != "." && (name == "vendor" || name == "testdata" || strings.HasPrefix(name, ".")) {
 				return filepath.SkipDir
 			}
 			return nil
