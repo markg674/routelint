@@ -35,6 +35,15 @@ similar routers: `Get`, `Post`, `Put`, `Delete`, `Patch`, `Head`,
 not on the receiver's type, so it works without needing to type-check
 against your actual router dependency.
 
+It follows chi-style route groups too: `r.Route("/users", func(r chi.Router)
+{ ... })` establishes a path prefix for everything registered inside the
+closure, and `r.Group(func(r chi.Router) { ... })` nests without adding one.
+Groups can be nested arbitrarily deep; each route's effective pattern is
+built from the full chain of enclosing prefixes before any check runs, so a
+duplicate or malformed pattern buried inside a group is reported against
+the path it actually registers, not the literal string passed to `Get` or
+`Post`.
+
 It also understands Go 1.22's enhanced `ServeMux` pattern syntax,
 `[METHOD ][HOST]/PATH`, so a pattern like `"GET /users/{id}"` is checked
 against its path (`/users/{id}`), not the literal string. Two patterns
@@ -85,8 +94,9 @@ be wired into CI as a plain build step.
 ## Status
 
 Early. The checks above are deliberately simple string and structural
-checks; there's no understanding yet of route groups/mounts that prefix
-a whole set of children with a shared path.
+checks. Route groups are understood for the chi `Route`/`Group` closure
+style; a mount onto a sub-router built elsewhere, `r.Mount("/api",
+apiRouter)`, isn't followed since there's no closure to look inside.
 
 ## License
 

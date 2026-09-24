@@ -44,42 +44,130 @@ var routeMethods = map[string]bool{
 
 // extractRoutes walks a parsed file looking for calls of the form
 // receiver.Method("pattern", handler, ...) where Method is a known route
-// method and the first argument is a string literal.
+// method and the first argument is a string literal. It also recognizes
+// chi-style route groups, receiver.Route("/prefix", func(r chi.Router)
+// {...}) and receiver.Group(func(r chi.Router) {...}), and prefixes every
+// route found inside the group's function literal with the group's own
+// prefix, nesting groups within groups as needed.
 func extractRoutes(fset *token.FileSet, file *ast.File, filename string) []Route {
 	var routes []Route
 
-	ast.Inspect(file, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok {
+	var walk func(node ast.Node, prefix string)
+	walk = func(node ast.Node, prefix string) {
+		ast.Inspect(node, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+
+			if groupPrefix, body, ok := routeGroup(sel.Sel.Name, call); ok {
+				walk(body, joinPrefix(prefix, groupPrefix))
+				return false
+			}
+
+			if !routeMethods[sel.Sel.Name] {
+				return true
+			}
+			// A route registration needs at least a pattern and a handler.
+			if len(call.Args) < 2 {
+				return true
+			}
+			lit, ok := call.Args[0].(*ast.BasicLit)
+			if !ok || lit.Kind != token.STRING {
+				return true
+			}
+			pattern, err := strconv.Unquote(lit.Value)
+			if err != nil {
+				return true
+			}
+			pos := fset.Position(lit.Pos())
+			routes = append(routes, Route{
+				File:    filename,
+				Line:    pos.Line,
+				Method:  sel.Sel.Name,
+				Pattern: joinRoutePattern(prefix, pattern),
+			})
 			return true
-		}
-		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok || !routeMethods[sel.Sel.Name] {
-			return true
-		}
-		// A route registration needs at least a pattern and a handler.
-		if len(call.Args) < 2 {
-			return true
-		}
-		lit, ok := call.Args[0].(*ast.BasicLit)
-		if !ok || lit.Kind != token.STRING {
-			return true
-		}
-		pattern, err := strconv.Unquote(lit.Value)
-		if err != nil {
-			return true
-		}
-		pos := fset.Position(lit.Pos())
-		routes = append(routes, Route{
-			File:    filename,
-			Line:    pos.Line,
-			Method:  sel.Sel.Name,
-			Pattern: pattern,
 		})
-		return true
-	})
+	}
+	walk(file, "")
 
 	return routes
+}
+
+// routeGroup reports whether call is a chi-style route group: Route(prefix,
+// func(r chi.Router) {...}), which establishes a path prefix for everything
+// registered inside the literal, or Group(func(r chi.Router) {...}), which
+// nests without adding one. It returns the group's own prefix (empty for
+// Group) and the literal's body to recurse into. Anything that doesn't
+// match this exact shape, such as an unrelated method that happens to be
+// named Route, is left alone and walked as a normal call.
+func routeGroup(name string, call *ast.CallExpr) (prefix string, body *ast.BlockStmt, ok bool) {
+	switch name {
+	case "Route":
+		if len(call.Args) != 2 {
+			return "", nil, false
+		}
+		lit, isLit := call.Args[0].(*ast.BasicLit)
+		fn, isFn := call.Args[1].(*ast.FuncLit)
+		if !isLit || lit.Kind != token.STRING || !isFn {
+			return "", nil, false
+		}
+		p, err := strconv.Unquote(lit.Value)
+		if err != nil {
+			return "", nil, false
+		}
+		return p, fn.Body, true
+	case "Group":
+		if len(call.Args) != 1 {
+			return "", nil, false
+		}
+		fn, isFn := call.Args[0].(*ast.FuncLit)
+		if !isFn {
+			return "", nil, false
+		}
+		return "", fn.Body, true
+	}
+	return "", nil, false
+}
+
+// joinPrefix concatenates two chi-style group prefixes, both plain path
+// fragments rather than full ServeMux patterns, without producing a
+// doubled slash at the seam.
+func joinPrefix(outer, inner string) string {
+	if outer == "" {
+		return inner
+	}
+	if inner == "" {
+		return outer
+	}
+	return strings.TrimSuffix(outer, "/") + inner
+}
+
+// joinRoutePattern applies an accumulated group prefix to a route's own
+// pattern. The prefix is always a plain path fragment, so it's inserted
+// after any method/host component the pattern itself carries, e.g. prefix
+// "/users" combined with pattern "GET /{id}" produces "GET /users/{id}",
+// not "/usersGET /{id}". A pattern that fails to parse is left for
+// checkPatterns to flag on its own; the prefix is still applied so the
+// reported pattern matches what actually gets registered.
+func joinRoutePattern(prefix, pattern string) string {
+	if prefix == "" {
+		return pattern
+	}
+	method, host, path, err := parseMuxPattern(pattern)
+	if err != nil {
+		return joinPrefix(prefix, pattern)
+	}
+	rest := host + joinPrefix(prefix, path)
+	if method == "" {
+		return rest
+	}
+	return method + " " + rest
 }
 
 // parseMuxPattern splits a route pattern into the components defined by Go

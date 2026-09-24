@@ -127,6 +127,82 @@ func TestCheckPatterns(t *testing.T) {
 	}
 }
 
+func TestJoinPrefix(t *testing.T) {
+	cases := []struct{ outer, inner, want string }{
+		{"", "/users", "/users"},
+		{"/users", "", "/users"},
+		{"/users", "/{id}", "/users/{id}"},
+		{"/users/", "/{id}", "/users/{id}"},
+	}
+	for _, tc := range cases {
+		if got := joinPrefix(tc.outer, tc.inner); got != tc.want {
+			t.Errorf("joinPrefix(%q, %q) = %q, want %q", tc.outer, tc.inner, got, tc.want)
+		}
+	}
+}
+
+func TestJoinRoutePattern(t *testing.T) {
+	cases := []struct{ prefix, pattern, want string }{
+		{"", "/{id}", "/{id}"},
+		{"/users", "/{id}", "/users/{id}"},
+		{"/users", "/", "/users/"},
+		{"/users", "GET /{id}", "GET /users/{id}"},
+		{"/users", "GET example.com/{id}", "GET example.com/users/{id}"},
+		{"/users", "no-slash", "/usersno-slash"},
+	}
+	for _, tc := range cases {
+		if got := joinRoutePattern(tc.prefix, tc.pattern); got != tc.want {
+			t.Errorf("joinRoutePattern(%q, %q) = %q, want %q", tc.prefix, tc.pattern, got, tc.want)
+		}
+	}
+}
+
+// TestExtractRoutesGroups exercises the chi-style Route/Group recursion
+// against real parsed source, including nested groups and a Group call
+// with no prefix of its own.
+func TestExtractRoutesGroups(t *testing.T) {
+	const src = `package fixtures
+
+func setup(r chi.Router) {
+	r.Get("/health", health)
+	r.Route("/users", func(r chi.Router) {
+		r.Get("/", listUsers)
+		r.Route("/{id}", func(r chi.Router) {
+			r.Get("/posts", listPosts)
+		})
+		r.Group(func(r chi.Router) {
+			r.Get("/export", exportUsers)
+		})
+	})
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "groups.go", src, 0)
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+
+	routes := extractRoutes(fset, file, "groups.go")
+	got := make(map[int]string, len(routes))
+	for _, r := range routes {
+		got[r.Line] = r.Pattern
+	}
+	want := map[int]string{
+		4:  "/health",
+		6:  "/users/",
+		8:  "/users/{id}/posts",
+		11: "/users/export",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("extractRoutes() returned %d routes, want %d: %+v", len(got), len(want), routes)
+	}
+	for line, pattern := range want {
+		if got[line] != pattern {
+			t.Errorf("route at line %d: Pattern = %q, want %q", line, got[line], pattern)
+		}
+	}
+}
+
 // TestExtractAndCheckFixture exercises extraction and checking together
 // against a real parsed file, the same way main does, rather than just
 // against hand-built Route values.
