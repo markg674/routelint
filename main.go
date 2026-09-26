@@ -4,6 +4,8 @@
 package main
 
 import (
+	"encoding/json"
+	"flag"
 	"fmt"
 	"go/parser"
 	"go/token"
@@ -14,7 +16,10 @@ import (
 )
 
 func main() {
-	args := os.Args[1:]
+	jsonOutput := flag.Bool("json", false, "emit findings as a JSON array instead of plain text")
+	flag.Parse()
+
+	args := flag.Args()
 	if len(args) == 0 {
 		args = []string{"."}
 	}
@@ -41,12 +46,31 @@ func main() {
 	}
 
 	findings := checkPatterns(routes)
-	for _, f := range findings {
-		fmt.Printf("%s:%d: %s\n", f.File, f.Line, f.Message)
+	if *jsonOutput {
+		printFindingsJSON(findings)
+	} else {
+		for _, f := range findings {
+			fmt.Printf("%s:%d: %s\n", f.File, f.Line, f.Message)
+		}
 	}
 
 	if len(findings) > 0 {
 		os.Exit(1)
+	}
+}
+
+// printFindingsJSON writes findings as a JSON array to stdout. It always
+// emits an array, even when there are zero findings, so CI tooling doesn't
+// need to special-case an empty result against a bare "null".
+func printFindingsJSON(findings []Finding) {
+	if findings == nil {
+		findings = []Finding{}
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(findings); err != nil {
+		fmt.Fprintf(os.Stderr, "routelint: %v\n", err)
+		os.Exit(2)
 	}
 }
 

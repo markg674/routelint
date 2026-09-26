@@ -89,7 +89,14 @@ internal/api/routes.go:4: duplicate route "HandleFunc /users", first registered 
 ```
 
 Exit status is 1 if any findings were reported, 0 otherwise, so it can
-be wired into CI as a plain build step.
+be wired into CI as a plain build step. Pass `-json` to get findings as a
+JSON array (`file`, `line`, `message`) on stdout instead of the plain-text
+lines above, for tooling that wants to parse the output rather than
+scrape it:
+
+```
+./routelint -json ./...
+```
 
 ## Status
 

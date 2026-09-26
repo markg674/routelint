@@ -19,9 +19,9 @@ type Route struct {
 
 // Finding is a single problem reported by a check, tied to a location.
 type Finding struct {
-	File    string
-	Line    int
-	Message string
+	File    string `json:"file"`
+	Line    int    `json:"line"`
+	Message string `json:"message"`
 }
 
 // routeMethods are the call names we treat as route registrations. This
