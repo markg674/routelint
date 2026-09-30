@@ -98,6 +98,27 @@ scrape it:
 ./routelint -json ./...
 ```
 
+## Config file
+
+To silence known cases, put a `.routelint.json` in the directory you run
+routelint from, or pass `-config path/to/file.json`:
+
+```json
+{
+  "ignore_files": ["*_gen.go", "internal/legacy/"],
+  "ignore_patterns": ["/healthz", "GET /debug/*"]
+}
+```
+
+`ignore_files` entries are globs matched against the file's path and its
+base name; an entry ending in `/` excludes a whole directory. 
+`ignore_patterns` entries are matched against the effective route pattern
+(after group prefixes are applied), either exactly or as a glob where `*`
+does not cross a `/`. Ignored routes are dropped before any check runs, so
+they also stop counting as the original of a duplicate. Unknown keys and
+malformed globs are errors. A missing default file is fine; a missing file
+given with `-config` is not.
+
 ## Status
 
 Early. The checks above are deliberately simple string and structural

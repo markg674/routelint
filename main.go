@@ -17,7 +17,14 @@ import (
 
 func main() {
 	jsonOutput := flag.Bool("json", false, "emit findings as a JSON array instead of plain text")
+	configPath := flag.String("config", "", "path to a JSON config file (default: "+defaultConfigName+" in the working directory, if present)")
 	flag.Parse()
+
+	cfg, err := loadConfig(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "routelint: %v\n", err)
+		os.Exit(2)
+	}
 
 	args := flag.Args()
 	if len(args) == 0 {
@@ -31,7 +38,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "routelint: %v\n", err)
 			os.Exit(2)
 		}
-		files = append(files, found...)
+		files = append(files, cfg.filterFiles(found)...)
 	}
 
 	fset := token.NewFileSet()
@@ -45,7 +52,7 @@ func main() {
 		routes = append(routes, extractRoutes(fset, file, path)...)
 	}
 
-	findings := checkPatterns(routes)
+	findings := checkPatterns(cfg.filterRoutes(routes))
 	if *jsonOutput {
 		printFindingsJSON(findings)
 	} else {
